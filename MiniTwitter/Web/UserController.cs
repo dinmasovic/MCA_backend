@@ -1,8 +1,10 @@
-﻿using Microsoft.AspNetCore.Http;
+﻿using MediatR;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using MiniTwitter.CQRS.User.GetUserPosts;
 using MiniTwitter.Dto;
 using MiniTwitter.Model;
-using MiniTwitter.Service;
+using System.Threading.Tasks;
 
 namespace MiniTwitter.Web
 {
@@ -10,30 +12,30 @@ namespace MiniTwitter.Web
     [ApiController]
     public class UserController : ControllerBase
     {
-        private readonly UserService userService;
+        private readonly IMediator _mediator;
 
-        public UserController(UserService userService)
+        public UserController(IMediator mediator)
         {
-            this.userService = userService;
+            _mediator = mediator;
         }
 
         [HttpGet("userPosts")]
-        public IActionResult GetUserPosts()
+        public async Task<ActionResult<List<DisplayPostDto>>> GetUserPosts()
         {
-            List<DisplayPostDto> userPosts = DisplayPostDto.toDto(userService.getUserPosts("user"));
-            if (userPosts == null)
+            List<DisplayPostDto> result =await _mediator.Send(new GetUserPostsQuery("user"));
+            if (result == null)
             {
                 return BadRequest("There is no user with the given username");
             }
-            return Ok(userPosts);
+            return Ok(result);
         }
         [HttpPost("createPost")]
-        public IActionResult createPost(CreatePostDto dto)
+        public async Task<ActionResult<DisplayPostDto>> createPost(CreatePostDto dto)
         {
             try
             {
-                Post tmp = userService.createPost(dto.content, dto.userId);
-                return Ok(DisplayPostDto.toDto(tmp));
+                DisplayPostDto result = await _mediator.Send(new MiniTwitter.CQRS.User.CreatePost.CreatePostCommand(dto.content, dto.userId));
+                return Ok(result);
 
             }
             catch (Exception ex)
@@ -43,11 +45,11 @@ namespace MiniTwitter.Web
             }
         }
         [HttpDelete("deletePost/{postId}")]
-        public IActionResult deletePost(int postId)
+        public async Task<IActionResult> deletePost(int postId)
         {
             try
             {
-                userService.deletePost(postId);
+                await _mediator.Send(new MiniTwitter.CQRS.User.DeletePost.DeletePostCommand(postId));
                 return Ok("Post has been deleted");
             }
             catch (Exception ex)

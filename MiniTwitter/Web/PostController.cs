@@ -1,6 +1,7 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using MediatR;
+using Microsoft.AspNetCore.Mvc;
+using MiniTwitter.CQRS.Post.GetPosts;
 using MiniTwitter.Dto;
-using MiniTwitter.Service;
 
 namespace MiniTwitter.Web
 {
@@ -9,16 +10,17 @@ namespace MiniTwitter.Web
     [ApiController]
     public class PostController : ControllerBase
     {
-        private readonly PostService postService;
+        private readonly IMediator _mediator;
 
-        public PostController(PostService postService)
+        public PostController(IMediator mediator)
         {
-            this.postService = postService;
+            _mediator = mediator;
         }
         [HttpGet]
-        public IActionResult getPosts()
+        public async Task<ActionResult<List<DisplayPostDto>>> getPosts()
         {
-            return Ok(DisplayPostDto.toDto(postService.getPosts()));
+            var result = await _mediator.Send(new GetPostsQuery());
+            return Ok(result);
         }
     }
 }

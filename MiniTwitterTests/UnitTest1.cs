@@ -1,42 +1,60 @@
+using MediatR;
 using Microsoft.EntityFrameworkCore;
 using MiniTwitter.Model;
 using MiniTwitter.Repository;
-using MiniTwitter.Service.impl;
-using System;
-using System.Collections.Generic;
-using System.Linq;
+using MiniTwitter.CQRS.Post.GetPosts;       
+using MiniTwitter.CQRS.User.CreatePost;     
+using MiniTwitter.CQRS.User.GetUserPosts;   
+using MiniTwitter.CQRS.User.DeletePost;    
 using Xunit;
+using System;
+using System.Linq;
+using System.Threading.Tasks;
+using Microsoft.Extensions.DependencyInjection; 
 
 namespace MiniTwitterTests
 {
-    public class UserServiceTests
+    public class MediatorTests
     {
+
         private MiniTwitterDb GetInMemoryDb()
         {
             var options = new DbContextOptionsBuilder<MiniTwitterDb>()
-                .UseInMemoryDatabase(Guid.NewGuid().ToString()) 
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
                 .Options;
 
             return new MiniTwitterDb(options);
         }
 
+
+        private IMediator GetMediator(MiniTwitterDb context)
+        {
+            var services = new ServiceCollection();
+
+            services.AddLogging();
+            services.AddSingleton(context);
+            services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(CreatePostCommandHandler).Assembly));
+            var serviceProvider = services.BuildServiceProvider();
+            return serviceProvider.GetRequiredService<IMediator>();
+        }
+
+  
+
         [Fact]
         public void TestGetPosts()
         {
             using var context = GetInMemoryDb();
+            var mediator = GetMediator(context); 
 
             var user = new User("user");
             context.Users.Add(user);
             context.SaveChanges();
 
-            var postService = new PostServiceImpl(context);
-            var userService = new UserServiceImpl(context);
+            mediator.Send(new CreatePostCommand("Hello this is my first post", user.Id)).Wait();
+            mediator.Send(new CreatePostCommand("Hello this is my second post", user.Id)).Wait();
+            mediator.Send(new CreatePostCommand("Hello this is my third post", user.Id)).Wait();
 
-            userService.createPost("Hello this is my first post", user.Id);
-            userService.createPost("Hello this is my second post", user.Id);
-            userService.createPost("Hello this is my third post", user.Id);
-
-            var allPosts = postService.getPosts();
+            var allPosts = mediator.Send(new GetPostsQuery()).Result;
 
             Assert.Equal(3, allPosts.Count);
         }
@@ -45,19 +63,18 @@ namespace MiniTwitterTests
         public void TestGetUserPosts()
         {
             using var context = GetInMemoryDb();
+            var mediator = GetMediator(context);
 
             var user1 = new User("user");
             var user2 = new User("user2");
             context.Users.AddRange(user1, user2);
             context.SaveChanges();
 
-            var userService = new UserServiceImpl(context);
+            mediator.Send(new CreatePostCommand("User1 first post", user1.Id)).Wait();
+            mediator.Send(new CreatePostCommand("User2 first post", user2.Id)).Wait();
+            mediator.Send(new CreatePostCommand("User2 second post", user2.Id)).Wait();
 
-            userService.createPost("User1 first post", user1.Id);
-            userService.createPost("User2 first post", user2.Id);
-            userService.createPost("User2 second post", user2.Id);
-
-            var user1Posts = userService.getUserPosts("user");
+            var user1Posts = mediator.Send(new GetUserPostsQuery("user")).Result;
 
             Assert.Single(user1Posts);
             Assert.Equal("User1 first post", user1Posts.First().content);
@@ -67,17 +84,19 @@ namespace MiniTwitterTests
         public void TestCreatePost_Validation()
         {
             using var context = GetInMemoryDb();
+            var mediator = GetMediator(context);
             var user = new User("user");
             context.Users.Add(user);
             context.SaveChanges();
 
-            var userService = new UserServiceImpl(context);
-            var ex = Assert.Throws<ArgumentException>(() =>
-                userService.createPost("Too short", user.Id));
+            var ex = Assert.Throws<AggregateException>(() =>
+                mediator.Send(new CreatePostCommand("Too short", user.Id)).Wait());
 
-            Assert.Equal("Content must be between 12 and 140 characters.", ex.Message);
+            Assert.Equal("Content must be between 12 and 140 characters.", ex.InnerException.Message);
 
-            var post = userService.createPost("This is a valid post content", user.Id);
+            var validCommand = new CreatePostCommand("This is a valid post content", user.Id);
+            var post = mediator.Send(validCommand).Result;
+
             Assert.Equal("This is a valid post content", post.content);
         }
 
@@ -85,20 +104,19 @@ namespace MiniTwitterTests
         public void TestDeletePost()
         {
             using var context = GetInMemoryDb();
+            var mediator = GetMediator(context);
             var user = new User("user");
             context.Users.Add(user);
             context.SaveChanges();
 
-            var userService = new UserServiceImpl(context);
+            var post1 = mediator.Send(new CreatePostCommand("First post, lllllllllll", user.Id)).Result;
+            var post2 = mediator.Send(new CreatePostCommand("Second post, lllllllllllll", user.Id)).Result;
 
-            var post1 = userService.createPost("First post, lllllllllll", user.Id);
-            var post2 = userService.createPost("Second post, lllllllllllll", user.Id);
-
-            userService.deletePost(post1.Id);
+            mediator.Send(new DeletePostCommand(post1.id)).Wait();
 
             var remainingPosts = context.Posts.ToList();
             Assert.Single(remainingPosts);
-            Assert.Equal(post2.Id, remainingPosts.First().Id);
+            Assert.Equal(post2.id, remainingPosts.First().Id);
         }
     }
 }
